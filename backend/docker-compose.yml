@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - .:/app
+    depends_on:
+      - db
+      - redis
+    environment:
+      - DATABASE_URL=postgres://blackwork:blackwork_password@db:5432/blackwork_db
+      - REDIS_URL=redis:6379
+    # Use air for hot reloading
+    command: air
+
+  db:
+    image: postgis/postgis:15-3.3
+    environment:
+      POSTGRES_USER: blackwork
+      POSTGRES_PASSWORD: blackwork_password
+      POSTGRES_DB: blackwork_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
