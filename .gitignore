@@ -1,0 +1,14 @@
+# Web
+webapp/node_modules/
+webapp/dist/
+webapp/.env*
+
+# Backend
+backend/tmp/
+backend/main
+backend/.env*
+.env
+
+# System
+.DS_Store
+*.local

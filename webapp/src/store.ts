@@ -57,6 +57,8 @@ interface AppState {
         skills: string[];
         name: string;
         language: Language;
+        city: string;
+        avatarEmoji: string;
         companyLogo?: string;
         companyName?: string;
         rating: number;
@@ -69,7 +71,7 @@ interface AppState {
     // Actions
     init: () => Promise<void>;
     sendOtp: (phone: string) => Promise<string>;
-    verifyOtp: (phone: string, code: string, role?: Role) => Promise<void>;
+    verifyOtp: (phone: string, code: string, role?: Role) => Promise<boolean>;
     setLanguage: (lang: Language) => void;
     setUser: (data: Partial<NonNullable<AppState['user']>>) => void;
     setRole: (role: Role) => void;
@@ -107,14 +109,16 @@ export const useAppStore = create<AppState>((set, get) => ({
             set({
                 user: {
                     ...userData,
-                    skills: [],
+                    city: userData.city || '',
+                    skills: userData.skills || [],
+                    avatarEmoji: userData.avatar_emoji || '👤',
                     companyName: userData.company_name,
                     companyLogo: userData.avatar_emoji,
                     reviews: []
                 }
             });
-            await get().fetchJobs();
-            await get().fetchConversations();
+            // Don't call fetchJobs/fetchConversations here, 
+            // the components (Feed/Dashboard/Chats) will trigger them via effects
         } catch (err) {
             get().logout();
         }
@@ -130,6 +134,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         saveToken(res.token);
         set({ token: res.token });
         await get().init();
+        return !!res.is_new;
     },
 
     setLanguage: (language) => {
@@ -143,12 +148,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         set((state) => ({
             user: state.user ? { ...state.user, ...data } : null
         }));
-        if (get().token) {
+        const user = get().user;
+        if (get().token && user) {
             api.put('/profile', {
-                name: data.name,
-                company_name: data.companyName,
-                avatar_emoji: data.companyLogo,
-                language: data.language
+                name: user.name,
+                company_name: user.companyName,
+                city: user.city,
+                skills: user.skills,
+                avatar_emoji: user.avatarEmoji,
+                language: user.language,
+                role: user.role
             });
         }
     },
@@ -157,6 +166,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         set((state) => ({
             user: state.user ? { ...state.user, role } : null
         }));
+        if (get().token) api.put('/profile', { role });
     },
 
     toggleSkill: (skill) => {
@@ -171,24 +181,43 @@ export const useAppStore = create<AppState>((set, get) => ({
     fetchJobs: async () => {
         const user = get().user;
         const path = user?.role === 'employer' ? '/employer/jobs' : '/jobs';
-        const data = await api.get<any[]>(path);
-        set({
-            jobs: data.map(j => ({
-                ...j,
-                dist: '1.2 км',
-            }))
-        });
+        try {
+            // Add cache-buster to avoid stale lists
+            const data = await api.get<any[]>(`${path}?t=${Date.now()}`);
+            console.log(`💼 Fetched ${data.length} jobs from ${path} (User ID: ${user.id})`);
+            set({
+                jobs: data.map(j => ({
+                    ...j,
+                    dist: '1.2 км',
+                }))
+            });
+        } catch (err) {
+            console.error('❌ Failed to fetch jobs:', err);
+        }
     },
 
     addJob: async (jobData) => {
-        const res = await api.post<any>('/jobs', jobData);
-        await get().fetchJobs();
-        return res.id;
+        try {
+            const res = await api.post<any>('/jobs', jobData);
+            // Optimistic update: trigger fetch immediately but also wait a bit
+            await get().fetchJobs();
+            // Optional: fallback fetch after 500ms to ensure DB consistency
+            setTimeout(() => get().fetchJobs(), 500);
+            return res.id;
+        } catch (err) {
+            alert('Ошибка при создании вакансии');
+            throw err;
+        }
     },
 
     updateJob: async (id, data) => {
-        await api.put(`/jobs/${id}`, data);
-        await get().fetchJobs();
+        try {
+            await api.put(`/jobs/${id}`, data);
+            await get().fetchJobs();
+            setTimeout(() => get().fetchJobs(), 500);
+        } catch (err) {
+            alert('Ошибка при обновлении вакансии');
+        }
     },
 
     deleteJob: async (id) => {
@@ -248,15 +277,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     },
 
     sendMessage: (matchId, text) => {
-        set((state) => ({
-            messages: [...state.messages, {
-                id: uuidv4(),
-                matchId,
-                senderId: state.user?.id || 'system',
-                text,
-                timestamp: Date.now()
-            }]
-        }));
+        // We don't add to state directly here, 
+        // we wait for the WebSocket broadcast to ensure sync with DB.
+        // But for UX, we could add a "pending" message.
+        // For now, let's keep it simple and wait for broadcast.
+        console.log('Sending message to', matchId, ':', text);
     },
 
     addIncomingMessage: (msg) => set(state => {
@@ -293,6 +318,12 @@ export const t = (key: string, lang: Language = 'ru') => {
             employer_sub: 'Разместить вакансию за 1 минуту',
             what_you_can: 'Что вы умеете?',
             your_company: 'Ваша компания',
+            user_data: 'Ваши данные',
+            your_name: 'Как вас зовут?',
+            name_placeholder: 'Иван Иванов',
+            your_city: 'В каком вы городе?',
+            city_placeholder: 'Москва',
+            company_name_placeholder: 'ООО СтройТех',
             done: 'Готово',
             vacancies: 'Вакансии',
             messages: 'Сообщения',
@@ -328,8 +359,7 @@ export const t = (key: string, lang: Language = 'ru') => {
             my_vacancies: 'Мои вакансии',
             confirm_skip: 'Пропустить эту вакансию?',
             yes_skip: 'Да, пропустить',
-            edit_profile: 'Редактировать профиль',
-            your_name: 'Ваше имя / ФИО'
+            edit_profile: 'Редактировать профиль'
         },
         uz: {
             select_lang: 'Tilni tanlang',

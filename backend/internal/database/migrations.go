@@ -17,6 +17,8 @@ func RunMigrations() {
 			role         VARCHAR(20) NOT NULL DEFAULT 'worker',
 			name         VARCHAR(255) NOT NULL DEFAULT '',
 			company_name VARCHAR(255) NOT NULL DEFAULT '',
+			city         VARCHAR(255) NOT NULL DEFAULT '',
+			skills       JSONB        NOT NULL DEFAULT '[]',
 			avatar_emoji VARCHAR(10)  NOT NULL DEFAULT '👤',
 			language     VARCHAR(5)   NOT NULL DEFAULT 'ru',
 			rating       NUMERIC(3,2) NOT NULL DEFAULT 5.00,
@@ -74,6 +76,11 @@ func RunMigrations() {
 		`CREATE INDEX IF NOT EXISTS idx_matches_worker ON job_matches(worker_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_reviews_reviewee ON reviews(reviewee_id)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_conv_unique ON conversations(job_id, employer_id, worker_id)`,
+
+		// Migration tasks for existing data
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS city VARCHAR(255) NOT NULL DEFAULT ''`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS skills JSONB NOT NULL DEFAULT '[]'`,
 	}
 
 	for _, q := range queries {

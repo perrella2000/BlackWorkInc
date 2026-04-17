@@ -8,6 +8,13 @@ export default defineConfig({
   base: '/BlackWorkInc/',
   server: {
     port: 1574,
-    host: true
+    host: true,
+    proxy: {
+      '/api': {
+        target: 'http://backend:8080',
+        changeOrigin: true,
+        ws: true
+      }
+    }
   }
 })

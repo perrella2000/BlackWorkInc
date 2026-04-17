@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: blackwork
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-blackwork_password}
+      POSTGRES_DB: blackwork_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  backend:
+    image: golang:alpine
+    platform: linux/arm64
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+      - gomod_cache:/go/pkg/mod
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://blackwork:blackwork_password@db:5432/blackwork_db}
+      REDIS_URL: redis:6379
+      JWT_SECRET: ${JWT_SECRET:-blackwork_secret_key_12345}
+      PORT: 8080
+      GOPROXY: https://proxy.golang.org,direct
+    command: go run main.go
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+
+  webapp:
+    image: node:20-alpine
+    platform: linux/arm64
+    working_dir: /app
+    volumes:
+      - ./webapp:/app
+    ports:
+      - "1574:1574"
+    command: sh -c "npm install && npm run dev -- --host"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  gomod_cache:

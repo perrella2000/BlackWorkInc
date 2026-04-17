@@ -107,6 +107,9 @@ func WSHandler(c *websocket.Conn) {
 	}
 	uid := userID.(string)
 
+	// Automatically join all existing conversations for this user
+	joinRoomsOnConnect(c, uid)
+
 	for {
 		_, raw, err := c.ReadMessage()
 		if err != nil {
@@ -119,7 +122,7 @@ func WSHandler(c *websocket.Conn) {
 			continue
 		}
 
-		// Register client to room on first message from this connection
+		// Register client to room if not already there (safety)
 		ensureRegistered(c, uid, msg.ConversationID)
 
 		// Persist message to DB
@@ -140,6 +143,25 @@ func WSHandler(c *websocket.Conn) {
 			Text:           msg.Text,
 			CreatedAt:      createdAt,
 		})
+	}
+}
+
+func joinRoomsOnConnect(conn *websocket.Conn, userID string) {
+	rows, err := database.DB.Query(context.Background(), `
+		SELECT id FROM conversations WHERE employer_id = $1 OR worker_id = $1
+	`, userID)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	mu.Lock()
+	defer mu.Unlock()
+	for rows.Next() {
+		var convID string
+		if err := rows.Scan(&convID); err == nil {
+			clients[convID] = append(clients[convID], &client{conn: conn, conversationID: convID, userID: userID})
+		}
 	}
 }
 

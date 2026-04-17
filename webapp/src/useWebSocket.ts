@@ -53,6 +53,9 @@ export function useWebSocket() {
     const send = useCallback((conversationId: string, text: string) => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({ conversation_id: conversationId, text }));
+        } else {
+            console.error('❌ WS not open. ReadyState:', wsRef.current?.readyState);
+            alert('Нет соединения с сервером. Попробуйте позже.');
         }
     }, []);
 

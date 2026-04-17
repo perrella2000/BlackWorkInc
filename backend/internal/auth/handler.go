@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"log"
 	"math/rand"
 	"os"
 	"time"
@@ -34,7 +35,7 @@ func SendOTP(c *fiber.Ctx) error {
 	code := fmt.Sprintf("%06d", rand.Intn(1000000))
 	key := "otp:" + req.Phone
 
-	rdb := database.Redis
+	rdb := database.RDB
 	if rdb != nil {
 		if err := rdb.Set(context.Background(), key, code, 5*time.Minute).Err(); err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to store otp"})
@@ -51,12 +52,14 @@ func SendOTP(c *fiber.Ctx) error {
 func VerifyOTP(c *fiber.Ctx) error {
 	var req verifyOTPRequest
 	if err := c.BodyParser(&req); err != nil {
+		fmt.Printf("❌ Auth BodyParser error: %v\n", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body"})
 	}
+	fmt.Printf("🔍 DEBUG AUTH: Phone=%s, Code=%s, Role=%s\n", req.Phone, req.Code, req.Role)
 
 	// In dev mode: accept "000000" or check Redis.
 	if req.Code != "000000" {
-		rdb := database.Redis
+		rdb := database.RDB
 		if rdb != nil {
 			stored, err := rdb.Get(context.Background(), "otp:"+req.Phone).Result()
 			if err != nil || stored != req.Code {
@@ -76,18 +79,30 @@ func VerifyOTP(c *fiber.Ctx) error {
 		req.Name = "Новый пользователь"
 	}
 
-	// Upsert user
+	log.Printf("🔑 Verifying OTP for %s. Requested Role: %s", req.Phone, req.Role)
+
+	var isNew bool
 	var userID, role string
-	row := database.DB.QueryRow(context.Background(),
-		`INSERT INTO users (phone, role, name, language)
-		 VALUES ($1, $2, $3, $4)
-		 ON CONFLICT (phone) DO UPDATE SET phone = EXCLUDED.phone
-		 RETURNING id, role`,
-		req.Phone, req.Role, req.Name, req.Lang,
-	)
-	if err := row.Scan(&userID, &role); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "db error: " + err.Error()})
+
+	err := database.DB.QueryRow(context.Background(), "SELECT id, role FROM users WHERE phone = $1", req.Phone).Scan(&userID, &role)
+	if err != nil {
+		// Assume user doesn't exist (pgx.ErrNoRows or otherwise)
+		isNew = true
+		role = req.Role
+		err = database.DB.QueryRow(context.Background(),
+			`INSERT INTO users (phone, role, name, language)
+			 VALUES ($1, $2, $3, $4) RETURNING id`,
+			req.Phone, role, req.Name, req.Lang,
+		).Scan(&userID)
+		if err != nil {
+			log.Printf("❌ Auth DB error: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "db error: " + err.Error()})
+		}
+	} else {
+		isNew = false
 	}
+
+	log.Printf("✅ User %s logged in as %s (New: %v)", userID, role, isNew)
 
 	token, err := issueJWT(userID, role, req.Phone)
 	if err != nil {
@@ -98,6 +113,7 @@ func VerifyOTP(c *fiber.Ctx) error {
 		"token":   token,
 		"user_id": userID,
 		"role":    role,
+		"is_new":  isNew,
 	})
 }
 

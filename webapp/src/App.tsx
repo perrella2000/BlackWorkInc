@@ -32,9 +32,13 @@ export default function App() {
 
   useEffect(() => {
     init().then(() => {
-      if (user) setStep('main');
+      // Only auto-redirect to main if we are at the initial language step
+      // This prevents interrupting the auth/role selection flow
+      if (user && (step === 'language')) {
+        setStep('main');
+      }
     });
-  }, [init, !!user]);
+  }, [init, !!user]); // Add step to dependencies if needed, but !!user is key
 
   const next = (s: AppStep) => setStep(s);
 
@@ -43,7 +47,7 @@ export default function App() {
       <ErrorBoundary>
         <AnimatePresence mode="wait">
           {step === 'language' && <LanguageStep key="lang" onSelect={() => next('auth')} />}
-          {step === 'auth' && <AuthStep key="auth" onNext={() => next('role')} />}
+          {step === 'auth' && <AuthStep key="auth" onNext={() => next('role')} onSkipToMain={() => next('main')} />}
           {step === 'role' && <RoleStep key="role" onNext={() => next('onboarding')} />}
           {step === 'onboarding' && <OnboardingStep key="onboarding" onFinish={() => next('main')} />}
           {step === 'main' && <MainLayout key="main" onLogout={() => setStep('language')} />}
@@ -87,7 +91,7 @@ function LanguageStep({ onSelect }: { onSelect: () => void }) {
   );
 }
 
-function AuthStep({ onNext }: { onNext: () => void }) {
+function AuthStep({ onNext, onSkipToMain }: { onNext: () => void, onSkipToMain: () => void }) {
   const tr = useTranslation();
   const [phone, setPhone] = useState('');
   const [showCode, setShowCode] = useState(false);
@@ -120,8 +124,12 @@ function AuthStep({ onNext }: { onNext: () => void }) {
       if (otp.length < 6) return;
       setIsLoading(true);
       try {
-        await verifyOtp(phone, otp, role || 'worker');
-        onNext();
+        const isNew = await verifyOtp(phone, otp, role || 'worker');
+        if (isNew) {
+          onNext();
+        } else {
+          onSkipToMain();
+        }
       } catch (err) {
         alert('Неверный код');
       } finally {
@@ -192,24 +200,42 @@ function OnboardingStep({ onFinish }: { onFinish: () => void }) {
   };
 
   return (
-    <StepWrapper title={user?.role === 'worker' ? tr('what_you_can') : tr('your_company')}>
-      <div className="mt-8 flex-1 overflow-y-auto">
+    <StepWrapper title={tr('user_data')}>
+      <div className="mt-8 flex-1 overflow-y-auto space-y-6">
+        {/* Common Name Field */}
+        <div>
+          <p className="text-[10px] font-black text-slate-400 uppercase ml-2 mb-1">{tr('your_name')}</p>
+          <input placeholder={tr('name_placeholder')} className="w-full p-5 glass rounded-2xl outline-none font-extrabold border border-slate-100 shadow-sm" value={user?.name || ''} onChange={e => setUser({ name: e.target.value })} />
+        </div>
+
+        {/* Common City Field */}
+        <div>
+          <p className="text-[10px] font-black text-slate-400 uppercase ml-2 mb-1">{tr('your_city')}</p>
+          <input placeholder={tr('city_placeholder')} className="w-full p-5 glass rounded-2xl outline-none font-extrabold border border-slate-100 shadow-sm" value={user?.city || ''} onChange={e => setUser({ city: e.target.value })} />
+        </div>
+
         {user?.role === 'worker' ? (
-          <div className="grid grid-cols-2 gap-3 pb-20">
-            {SKILLS.map(s => (
-              <button
-                key={s}
-                onClick={() => toggleSkill(s)}
-                className={`p-4 rounded-2xl font-black text-sm transition-all border-2 ${user.skills.includes(s) ? 'bg-blue-600 text-white border-blue-600 scale-105 shadow-md' : 'glass bg-white text-slate-600 border-transparent hover:border-blue-200'}`}
-              >
-                {s}
-              </button>
-            ))}
+          <div>
+            <p className="text-[10px] font-black text-slate-400 uppercase ml-2 mb-2">{tr('what_you_can')}</p>
+            <div className="grid grid-cols-2 gap-3 pb-10">
+              {SKILLS.map(s => (
+                <button
+                  key={s}
+                  onClick={() => toggleSkill(s)}
+                  className={`p-4 rounded-2xl font-black text-sm transition-all border-2 ${user.skills.includes(s) ? 'bg-blue-600 text-white border-blue-600 scale-105 shadow-md' : 'glass bg-white text-slate-600 border-transparent hover:border-blue-200'}`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
-          <div className="space-y-4">
-            <input placeholder={tr('company_name')} className="w-full p-5 glass rounded-2xl outline-none font-extrabold border border-slate-100 shadow-sm" value={user?.companyName || ''} onChange={e => setUser({ companyName: e.target.value })} />
-            <input placeholder={tr('objects_city')} className="w-full p-5 glass rounded-2xl outline-none font-extrabold border border-slate-100 shadow-sm" />
+          <div className="space-y-6">
+            <div>
+              <p className="text-[10px] font-black text-slate-400 uppercase ml-2 mb-1">{tr('company_name')}</p>
+              <input placeholder={tr('company_name_placeholder')} className="w-full p-5 glass rounded-2xl outline-none font-extrabold border border-slate-100 shadow-sm" value={user?.companyName || ''} onChange={e => setUser({ companyName: e.target.value })} />
+            </div>
+
             <div onClick={handlePhotoClick} className="p-10 glass rounded-3xl bg-blue-50/20 flex flex-col items-center justify-center border-dashed border-2 border-blue-100 cursor-pointer hover:bg-blue-50/40 transition-colors">
               {user?.companyLogo ? <span className="text-6xl">{user.companyLogo}</span> : <Camera className="text-blue-400 mb-2" size={40} />}
               <p className="text-blue-500 font-bold mt-2">{user?.companyLogo ? 'Сменить фото' : tr('add_photo')}</p>
@@ -229,6 +255,7 @@ function OnboardingStep({ onFinish }: { onFinish: () => void }) {
 function MainLayout({ onLogout }: { onLogout: () => void }) {
   const user = useAppStore(s => s.user);
   const matches = useAppStore(s => s.matches);
+  const jobs = useAppStore(s => s.jobs);
   const [activeTab, setActiveTab] = useState<'feed' | 'chats' | 'profile'>('feed');
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const [editingJob, setEditingJob] = useState<Job | null>(null);
@@ -242,6 +269,13 @@ function MainLayout({ onLogout }: { onLogout: () => void }) {
       setActiveChat(null);
     }
   }, [activeChat, activeMatchExists]);
+
+  // Auto-open job creation for new employers
+  useEffect(() => {
+    if (user?.role === 'employer' && jobs.length === 0) {
+      setShowCreate(true);
+    }
+  }, [user?.role, jobs.length]);
 
   if (activeChat) return <ChatView matchId={activeChat} onClose={() => setActiveChat(null)} />;
 
@@ -266,6 +300,7 @@ function MainLayout({ onLogout }: { onLogout: () => void }) {
       <AnimatePresence>
         {(showCreate || editingJob) && (
           <JobForm
+            key={editingJob ? editingJob.id : 'new'}
             job={editingJob || undefined}
             onClose={() => { setShowCreate(false); setEditingJob(null); }}
           />
@@ -288,8 +323,14 @@ function NavButton({ active, icon, onClick, badge }: any) {
 function WorkerFeed({ onMatch }: { onMatch: (id: string) => void }) {
   const tr = useTranslation();
   const jobs = useAppStore(s => s.jobs);
+  const fetchJobs = useAppStore(s => s.fetchJobs);
   const likeJob = useAppStore(s => s.likeJob);
   const skipJob = useAppStore(s => s.skipJob);
+
+  useEffect(() => {
+    fetchJobs();
+  }, [fetchJobs]);
+
   const [index, setIndex] = useState(0);
   const [confirmSkip, setConfirmSkip] = useState(false);
 
@@ -385,6 +426,13 @@ function EmployerDashboard({ onCreate, onEdit, onSelectChat }: { onCreate: () =>
   const tr = useTranslation();
   const jobs = useAppStore(s => s.jobs);
   const matches = useAppStore(s => s.matches);
+  const fetchJobs = useAppStore(s => s.fetchJobs);
+  const fetchConversations = useAppStore(s => s.fetchConversations);
+
+  useEffect(() => {
+    fetchJobs();
+    fetchConversations();
+  }, [fetchJobs, fetchConversations]);
 
   const [confirmData, setConfirmData] = useState<{ id: string, type: 'match' | 'job' } | null>(null);
 
